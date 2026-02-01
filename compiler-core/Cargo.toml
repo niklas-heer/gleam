@@ -49,6 +49,14 @@ stacker = "0.1.21"
 # Manipulating bit arrays
 bitvec = { version = "1", features = ["serde"] }
 
+# Native code generation via Cranelift
+cranelift-codegen = "0.116"
+cranelift-frontend = "0.116"
+cranelift-module = "0.116"
+cranelift-object = "0.116"
+cranelift-native = "0.116"
+target-lexicon = "0.13"
+
 async-trait.workspace = true
 base16.workspace = true
 camino = { workspace = true, features = ["serde1"] }
