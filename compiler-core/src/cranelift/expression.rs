@@ -36,13 +36,40 @@ pub fn compile_expr(
 
         TypedExpr::Float { float_value, .. } => {
             let value = float_value.value();
-            Ok(builder.ins().f64const(value))
+            let f64_val = builder.ins().f64const(value);
+            // Bitcast f64 to i64 to match our uniform i64 representation
+            // This preserves the bit pattern for later reconstruction
+            Ok(builder.ins().bitcast(types::I64, cranelift_codegen::ir::MemFlags::new(), f64_val))
         }
 
-        TypedExpr::Var { name, .. } => variables
-            .get(name)
-            .copied()
-            .ok_or_else(|| Error::Cranelift(format!("undefined variable: {name}"))),
+        TypedExpr::Var { name, constructor, .. } => {
+            use crate::type_::ValueConstructorVariant;
+
+            // Check if this is a known constructor (True, False, Nil)
+            match &constructor.variant {
+                ValueConstructorVariant::Record { name, arity: 0, .. } => {
+                    // Zero-arity constructors from prelude
+                    let value = match name.as_str() {
+                        "True" => 1i64,
+                        "False" => 0i64,
+                        "Nil" => 0i64,
+                        _ => return Err(Error::NotImplemented(format!("constructor: {}", name))),
+                    };
+                    Ok(builder.ins().iconst(types::I64, value))
+                }
+                ValueConstructorVariant::Record { name, .. } => {
+                    // Non-zero arity constructors need heap allocation
+                    Err(Error::NotImplemented(format!("constructor with args: {}", name)))
+                }
+                _ => {
+                    // Regular variable lookup
+                    variables
+                        .get(name)
+                        .copied()
+                        .ok_or_else(|| Error::Cranelift(format!("undefined variable: {name}")))
+                }
+            }
+        }
 
         TypedExpr::BinOp {
             name, left, right, ..
@@ -171,11 +198,31 @@ fn compile_binop(
         BinOp::DivInt => builder.ins().sdiv(l, r),
         BinOp::RemainderInt => builder.ins().srem(l, r),
 
-        // Float arithmetic
-        BinOp::AddFloat => builder.ins().fadd(l, r),
-        BinOp::SubFloat => builder.ins().fsub(l, r),
-        BinOp::MultFloat => builder.ins().fmul(l, r),
-        BinOp::DivFloat => builder.ins().fdiv(l, r),
+        // Float arithmetic - bitcast i64 to f64, operate, bitcast back
+        BinOp::AddFloat => {
+            let l_f64 = builder.ins().bitcast(types::F64, cranelift_codegen::ir::MemFlags::new(), l);
+            let r_f64 = builder.ins().bitcast(types::F64, cranelift_codegen::ir::MemFlags::new(), r);
+            let result = builder.ins().fadd(l_f64, r_f64);
+            builder.ins().bitcast(types::I64, cranelift_codegen::ir::MemFlags::new(), result)
+        }
+        BinOp::SubFloat => {
+            let l_f64 = builder.ins().bitcast(types::F64, cranelift_codegen::ir::MemFlags::new(), l);
+            let r_f64 = builder.ins().bitcast(types::F64, cranelift_codegen::ir::MemFlags::new(), r);
+            let result = builder.ins().fsub(l_f64, r_f64);
+            builder.ins().bitcast(types::I64, cranelift_codegen::ir::MemFlags::new(), result)
+        }
+        BinOp::MultFloat => {
+            let l_f64 = builder.ins().bitcast(types::F64, cranelift_codegen::ir::MemFlags::new(), l);
+            let r_f64 = builder.ins().bitcast(types::F64, cranelift_codegen::ir::MemFlags::new(), r);
+            let result = builder.ins().fmul(l_f64, r_f64);
+            builder.ins().bitcast(types::I64, cranelift_codegen::ir::MemFlags::new(), result)
+        }
+        BinOp::DivFloat => {
+            let l_f64 = builder.ins().bitcast(types::F64, cranelift_codegen::ir::MemFlags::new(), l);
+            let r_f64 = builder.ins().bitcast(types::F64, cranelift_codegen::ir::MemFlags::new(), r);
+            let result = builder.ins().fdiv(l_f64, r_f64);
+            builder.ins().bitcast(types::I64, cranelift_codegen::ir::MemFlags::new(), result)
+        }
 
         // Integer comparisons - these return i8 (bool), extend to i64
         BinOp::LtInt => {
@@ -195,21 +242,29 @@ fn compile_binop(
             builder.ins().uextend(types::I64, cmp)
         }
 
-        // Float comparisons
+        // Float comparisons - bitcast i64 to f64 first
         BinOp::LtFloat => {
-            let cmp = builder.ins().fcmp(FloatCC::LessThan, l, r);
+            let l_f64 = builder.ins().bitcast(types::F64, cranelift_codegen::ir::MemFlags::new(), l);
+            let r_f64 = builder.ins().bitcast(types::F64, cranelift_codegen::ir::MemFlags::new(), r);
+            let cmp = builder.ins().fcmp(FloatCC::LessThan, l_f64, r_f64);
             builder.ins().uextend(types::I64, cmp)
         }
         BinOp::LtEqFloat => {
-            let cmp = builder.ins().fcmp(FloatCC::LessThanOrEqual, l, r);
+            let l_f64 = builder.ins().bitcast(types::F64, cranelift_codegen::ir::MemFlags::new(), l);
+            let r_f64 = builder.ins().bitcast(types::F64, cranelift_codegen::ir::MemFlags::new(), r);
+            let cmp = builder.ins().fcmp(FloatCC::LessThanOrEqual, l_f64, r_f64);
             builder.ins().uextend(types::I64, cmp)
         }
         BinOp::GtFloat => {
-            let cmp = builder.ins().fcmp(FloatCC::GreaterThan, l, r);
+            let l_f64 = builder.ins().bitcast(types::F64, cranelift_codegen::ir::MemFlags::new(), l);
+            let r_f64 = builder.ins().bitcast(types::F64, cranelift_codegen::ir::MemFlags::new(), r);
+            let cmp = builder.ins().fcmp(FloatCC::GreaterThan, l_f64, r_f64);
             builder.ins().uextend(types::I64, cmp)
         }
         BinOp::GtEqFloat => {
-            let cmp = builder.ins().fcmp(FloatCC::GreaterThanOrEqual, l, r);
+            let l_f64 = builder.ins().bitcast(types::F64, cranelift_codegen::ir::MemFlags::new(), l);
+            let r_f64 = builder.ins().bitcast(types::F64, cranelift_codegen::ir::MemFlags::new(), r);
+            let cmp = builder.ins().fcmp(FloatCC::GreaterThanOrEqual, l_f64, r_f64);
             builder.ins().uextend(types::I64, cmp)
         }
 
