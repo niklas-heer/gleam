@@ -20,7 +20,7 @@ use super::Error;
 /// Compile an expression to Cranelift IR.
 pub fn compile_expr(
     expr: &TypedExpr,
-    builder: &mut FunctionBuilder,
+    builder: &mut FunctionBuilder<'_>,
     variables: &mut HashMap<EcoString, Value>,
     function_ids: &HashMap<EcoString, FuncId>,
     object_module: &mut ObjectModule,
@@ -182,7 +182,7 @@ fn compile_binop(
     op: BinOp,
     left: &TypedExpr,
     right: &TypedExpr,
-    builder: &mut FunctionBuilder,
+    builder: &mut FunctionBuilder<'_>,
     variables: &mut HashMap<EcoString, Value>,
     function_ids: &HashMap<EcoString, FuncId>,
     object_module: &mut ObjectModule,
@@ -296,7 +296,7 @@ fn compile_binop(
 fn compile_call(
     fun: &TypedExpr,
     arguments: &[crate::ast::CallArg<TypedExpr>],
-    builder: &mut FunctionBuilder,
+    builder: &mut FunctionBuilder<'_>,
     variables: &mut HashMap<EcoString, Value>,
     function_ids: &HashMap<EcoString, FuncId>,
     object_module: &mut ObjectModule,

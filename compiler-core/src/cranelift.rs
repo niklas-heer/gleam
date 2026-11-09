@@ -82,6 +82,7 @@ impl Default for Config {
 }
 
 /// The main code generator for native compilation.
+#[derive(Debug)]
 pub struct Generator<'a> {
     module: &'a TypedModule,
     #[allow(dead_code)]
@@ -306,7 +307,7 @@ impl<'a> Generator<'a> {
     pub fn compile_statements(
         &mut self,
         statements: &[TypedStatement],
-        builder: &mut FunctionBuilder,
+        builder: &mut FunctionBuilder<'_>,
     ) -> Result<cranelift_codegen::ir::Value, Error> {
         compile_statements(
             statements,
@@ -321,7 +322,7 @@ impl<'a> Generator<'a> {
 /// Compile a list of statements (standalone function to avoid borrow issues).
 fn compile_statements(
     statements: &[TypedStatement],
-    builder: &mut FunctionBuilder,
+    builder: &mut FunctionBuilder<'_>,
     variables: &mut HashMap<EcoString, cranelift_codegen::ir::Value>,
     function_ids: &HashMap<EcoString, cranelift_module::FuncId>,
     object_module: &mut ObjectModule,
@@ -338,7 +339,7 @@ fn compile_statements(
 /// Compile a single statement.
 fn compile_statement(
     statement: &TypedStatement,
-    builder: &mut FunctionBuilder,
+    builder: &mut FunctionBuilder<'_>,
     variables: &mut HashMap<EcoString, cranelift_codegen::ir::Value>,
     function_ids: &HashMap<EcoString, cranelift_module::FuncId>,
     object_module: &mut ObjectModule,

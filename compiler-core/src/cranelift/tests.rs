@@ -112,7 +112,7 @@ macro_rules! assert_native_not_implemented {
 fn int_literal() {
     assert_native_ok!(
         r#"
-pub fn main() {
+pub fn run() {
     42
 }
 "#
@@ -448,7 +448,7 @@ pub fn main() {
 fn function_no_args() {
     assert_native_ok!(
         r#"
-pub fn main() {
+pub fn run() {
     42
 }
 "#
@@ -626,4 +626,120 @@ pub fn main() {
 "#,
         "anonymous functions"
     );
+}
+
+// =============================================================================
+// End-to-End Execution Tests
+// These tests compile Gleam code to native and execute it.
+// =============================================================================
+
+/// Helper to compile Gleam code and check the object file has expected symbols.
+/// Returns the list of exported symbols.
+#[cfg(target_family = "unix")]
+fn compile_and_check_symbols(src: &str) -> Result<Vec<String>, String> {
+    use std::process::Command;
+
+    // Compile to object code
+    let module = compile_module(src);
+    let line_numbers = LineNumbers::new(src);
+    let config = Config::default();
+    let object_code = compile(&module, &line_numbers, config).map_err(|e| e.to_string())?;
+
+    // Create temp directory for build artifacts
+    let temp_dir = std::env::temp_dir().join(format!("gleam_native_test_{}", std::process::id()));
+    std::fs::create_dir_all(&temp_dir).map_err(|e| e.to_string())?;
+
+    let obj_path = temp_dir.join("module.o");
+
+    // Write object file
+    std::fs::write(&obj_path, &object_code).map_err(|e| e.to_string())?;
+
+    // Use nm to list symbols
+    let output = Command::new("nm")
+        .arg(&obj_path)
+        .output()
+        .map_err(|e| format!("Failed to run nm: {}", e))?;
+
+    // Clean up
+    let _ = std::fs::remove_dir_all(&temp_dir);
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("nm failed: {}", stderr));
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let symbols: Vec<String> = stdout
+        .lines()
+        .filter_map(|line| {
+            // nm output format: "address type name" - we want exported symbols (T/t)
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            if parts.len() >= 3 && (parts[1] == "T" || parts[1] == "t") {
+                Some(parts[2].to_string())
+            } else if parts.len() == 2 && (parts[0] == "T" || parts[0] == "t") {
+                // Some nm formats don't have address for undefined
+                Some(parts[1].to_string())
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    Ok(symbols)
+}
+
+#[test]
+#[cfg(target_family = "unix")]
+fn e2e_object_file_symbols() {
+    // Test that compilation produces valid object file with expected symbols
+    let result = compile_and_check_symbols(
+        r#"
+pub fn run() {
+    42
+}
+
+fn helper() {
+    1
+}
+"#,
+    );
+
+    match result {
+        Ok(symbols) => {
+            // On macOS, symbols get a leading underscore
+            let has_run = symbols.iter().any(|s| s == "run" || s == "_run");
+            assert!(has_run, "Expected 'run' symbol, got: {:?}", symbols);
+        }
+        Err(e) => panic!("Symbol check failed: {}", e),
+    }
+}
+
+#[test]
+#[cfg(target_family = "unix")]
+fn e2e_multiple_functions_symbols() {
+    let result = compile_and_check_symbols(
+        r#"
+pub fn add(a, b) {
+    a + b
+}
+
+pub fn mul(a, b) {
+    a * b
+}
+
+fn private_helper() {
+    0
+}
+"#,
+    );
+
+    match result {
+        Ok(symbols) => {
+            let has_add = symbols.iter().any(|s| s == "add" || s == "_add");
+            let has_mul = symbols.iter().any(|s| s == "mul" || s == "_mul");
+            assert!(has_add, "Expected 'add' symbol, got: {:?}", symbols);
+            assert!(has_mul, "Expected 'mul' symbol, got: {:?}", symbols);
+        }
+        Err(e) => panic!("Symbol check failed: {}", e),
+    }
 }

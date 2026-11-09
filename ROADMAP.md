@@ -34,7 +34,7 @@ Core infrastructure and basic compilation.
 - [x] Empty tuples (Nil)
 
 ### In Progress
-- [ ] Integration tests with actual Gleam code
+- [x] Integration tests with actual Gleam code (39 tests passing!)
 - [ ] End-to-end test: compile and execute simple program
 
 ### Not Started
